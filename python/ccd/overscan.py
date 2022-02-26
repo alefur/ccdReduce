@@ -14,6 +14,10 @@ class SerialOS(object):
     # sigma is default to 3 given the number of overscan column after trimming (31),
     mergeColumnConfig = dict(mergingMethod='clippedMean', clippingMethod='iqr', sigma=3)
     mergeRowConfig = dict(mergingMethod='clippedMean', clippingMethod='iqr', sigma=3)
+    mergeAmpConfig = dict(mergingMethod='clippedMean', clippingMethod='iqr', sigma=3)
+
+    # model overscan per row.
+    modelPerRow = True
 
     # polyfit deg is set to 3, no need to overfit which would increase the error.
     fitPolynomial = True
@@ -65,135 +69,72 @@ class SerialOS(object):
 
         return levelPerRow
 
-    def modelLevelPerRow(self, osIms, doPlot=False, fitPolynomial=None, polyfitConfig=None, mergeColumnConfig=None):
-        """ estimate a robust signal value per row"""
-        fitPolynomial = self.fitPolynomial if fitPolynomial is None else fitPolynomial
-        polyfitConfig = self.polyfitConfig if polyfitConfig is None else polyfitConfig
-        mergeColumnConfig = self.mergeColumnConfig if mergeColumnConfig is None else mergeColumnConfig
-
-        levelPerRow = self.levelPerRow(osIms, **mergeColumnConfig)
-
-        if fitPolynomial:
-            model = self.polyfit(levelPerRow, **polyfitConfig)
-        else:
-            model = levelPerRow
-
-        return model
-
-    def polyfit(self, levelPerRow, deg, nIter=5, **residRejectionConfig):
+    def polyfit(self, levelPerRow, deg, nIter=5, doPlot=False, **residRejectionConfig):
         """ """
         models = np.ones(levelPerRow.shape)
+        residuals = np.ma.masked_array(levelPerRow.copy())
 
         for ai, amp in enumerate(levelPerRow):
+            # for each amp
             rows = np.arange(len(amp))
             masked = np.ma.masked_array(amp)
             for it in range(nIter):
+                # fit a polynomial with a masked array.
                 p = np.ma.polyfit(rows, masked, deg=deg)
                 model = np.polyval(p, rows)
                 resid = masked - model
+                # update the mask from the sigma-clipping of the residuals.
                 newMask = ccdStats.sigmaClip(resid, axis=0, **residRejectionConfig)
                 masked.mask = newMask.mask
 
+            # you want all the "final" data.
+            resid = np.ma.masked_array(amp - model)
+            resid.mask = newMask.mask
+
             models[ai] = model
+            residuals[ai] = resid
 
-        return models
+        if doPlot:
+            fig, axs = plt.subplots(nrows=8, ncols=1, figsize=(14, 8), sharex=True)
+            axs[0].set_title(f'polyfit(deg={deg}) {str(residRejectionConfig)}')
 
-    # def levelPerRow(self, arrayPerAmp, fitPolynomial=None, doPlot=False, polyfitConfig=None, clippingConfig=None):
-    #     """ estimate a robust signal value per row"""
-    #     # default argument from class attribute
-    #     fitPolynomial = self.fitPolynomial if fitPolynomial is None else fitPolynomial
-    #     polyfitConfig = self.polyfitConfig if polyfitConfig is None else polyfitConfig
-    #     clippingConfig = self.clippingConfig if clippingConfig is None else clippingConfig
-    #     # empty array
-    #     levels = np.zeros((arrayPerAmp.shape[0], arrayPerAmp.shape[1]), dtype='f4')
-    #
-    #     if doPlot:
-    #         fig, axs = plt.subplots(nrows=8, ncols=1, figsize=(14, 8), sharex=True)
-    #
-    #     clippedPerRow = ccdStats.clippedMean(arrayPerAmp, axis=2, **clippingConfig)
-    #
-    #     for ai, amp in enumerate(clippedPerRow):
-    #         # sigma is default to 3 given the number of overscan column after trimming (26),
-    #         # I wont necessarily increase it.
-    #
-    #         # polyfit deg is set to 3, no need to overfit which would increase the error.
-    #         model = ccdStats.crudePolyfit(amp, **polyfitConfig)
-    #         levels[ai] = model if fitPolynomial else amp
-    #
-    #         if doPlot:
-    #             axs[ai].set_ylabel(f'amp{ai}')
-    #             axs[ai].plot(amp, alpha=0.5, label=f'clippedMean {clippingConfig["sigma"]}-sigma')
-    #             axs[ai].plot(model, label=f'polyfit(n={polyfitConfig["deg"]})')
-    #             axs[ai].set_xlim(-100, 5200)
-    #             axs[ai].grid()
-    #             axs[ai].legend()
-    #
-    #     return levels
+            for ai, amp in enumerate(levelPerRow):
+                axs[ai].plot(amp, alpha=0.5, label=f'amp{ai}')
+                axs[ai].plot(models[ai])
+                axs[ai].set_xlim(-100, 4700)
+                axs[ai].grid()
+                axs[ai].legend()
 
-# from importlib import reload
-#
-# import ccd.stats as ccdStats
-# import matplotlib.pyplot as plt
-# import numpy as np
-#
-# reload(ccdStats)
-#
-#
-# class SerialOS(object):
-#     colTrim = (0, 0)
-#     nCols = 32
-#
-#     mergeColumnConfig = dict(mergingMethod='clippedMean', clippingMethod='iqr', sigma=3)
-#     mergeRowConfig = dict(mergingMethod='clippedMean', clippingMethod='iqr', sigma=3)
-#
-#     fitPolynomial = True
-#     polyfitConfig = dict(deg=3)
-#
-#     def levelPerColumn(self, osIms, subMedian=False, doPlot=False, **updateMergeRowConfig):
-#         """ plot serial level per amp and per column, useful to know which columns to trim."""
-#         # update merging row config
-#         mergeRowConfig = self.mergeRowConfig
-#         mergeRowConfig.update(updateMergeRowConfig)
-#
-#         levelPerColumn = ccdStats.merge(osIms, axis=1, **mergeRowConfig)
-#
-#         plt.figure(figsize=(12, 6))
-#
-#         for ai, perColumn in enumerate(levelPerColumn):
-#             offset = np.median(perColumn) if subMedian else 0
-#             plt.plot(perColumn - offset, label=ai)
-#
-#         plt.grid()
-#         plt.legend()
-#
-#     def levelPerRow(self, arrayPerAmp, fitPolynomial=None, doPlot=False, polyfitConfig=None, clippingConfig=None):
-#         """ estimate a robust signal value per row"""
-#         # default argument from class attribute
-#         fitPolynomial = self.fitPolynomial if fitPolynomial is None else fitPolynomial
-#         polyfitConfig = self.polyfitConfig if polyfitConfig is None else polyfitConfig
-#         clippingConfig = self.clippingConfig if clippingConfig is None else clippingConfig
-#         # empty array
-#         levels = np.zeros((arrayPerAmp.shape[0], arrayPerAmp.shape[1]), dtype='f4')
-#
-#         if doPlot:
-#             fig, axs = plt.subplots(nrows=8, ncols=1, figsize=(14, 8), sharex=True)
-#
-#         clippedPerRow = ccdStats.clippedMean(arrayPerAmp, axis=2, **clippingConfig)
-#
-#         for ai, amp in enumerate(clippedPerRow):
-#             # sigma is default to 3 given the number of overscan column after trimming (26),
-#             # I wont necessarily increase it.
-#
-#             # polyfit deg is set to 3, no need to overfit which would increase the error.
-#             model = ccdStats.crudePolyfit(amp, **polyfitConfig)
-#             levels[ai] = model if fitPolynomial else amp
-#
-#             if doPlot:
-#                 axs[ai].set_ylabel(f'amp{ai}')
-#                 axs[ai].plot(amp, alpha=0.5, label=f'clippedMean {clippingConfig["sigma"]}-sigma')
-#                 axs[ai].plot(model, label=f'polyfit(n={polyfitConfig["deg"]})')
-#                 axs[ai].set_xlim(-100, 5200)
-#                 axs[ai].grid()
-#                 axs[ai].legend()
-#
-#         return levels
+        return models, residuals
+
+    def estimate(self, osIms, modelPerRow=None, fitPolynomial=None, updatePolyfitConfig=None,
+                 updateMergeColumnConfig=None, updateMergeAmpConfig=None):
+        """ estimate a robust signal value per row"""
+
+        def updateConfig(config, update):
+            if update is not None:
+                config.update(update)
+            return config
+
+        # get and update config
+        modelPerRow = self.modelPerRow if modelPerRow is None else modelPerRow
+        fitPolynomial = self.fitPolynomial if fitPolynomial is None else fitPolynomial
+        polyfitConfig = updateConfig(self.polyfitConfig, updatePolyfitConfig)
+        mergeColumnConfig = updateConfig(self.mergeColumnConfig, updateMergeColumnConfig)
+        mergeAmpConfig = updateConfig(self.mergeAmpConfig, updateMergeAmpConfig)
+
+        # model your overscan per-amp and per-row.
+        if modelPerRow:
+            levelPerRow = self.levelPerRow(osIms, **mergeColumnConfig)
+            if fitPolynomial:
+                model, residuals = self.polyfit(levelPerRow, **polyfitConfig)
+            else:
+                model = levelPerRow
+        # just a single value per-amp
+        else:
+            model = ccdStats.merge(osIms, axis=(1, 2), **mergeAmpConfig)
+
+        # keep same dimensions.
+        expandDim = 2 if modelPerRow else (1, 2)
+
+        return np.expand_dims(model, expandDim)

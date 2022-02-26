@@ -26,11 +26,10 @@ def iqrClipping(array, sigma, axis):
     iqrToStd = 0.7413
     lowerQuartile, medianBiasArr, upperQuartile = np.percentile(array, [25.0, 50.0, 75.0], axis=axis)
     stdevBiasArr = iqrToStd * (upperQuartile - lowerQuartile)  # robust stdev
-    # expand axis if necessary
-    if axis > 0:
-        medianBiasArr = np.expand_dims(medianBiasArr, axis=axis)
-        stdevBiasArr = np.expand_dims(stdevBiasArr, axis=axis)
-
+    # expand axis
+    medianBiasArr = np.expand_dims(medianBiasArr, axis=axis)
+    stdevBiasArr = np.expand_dims(stdevBiasArr, axis=axis)
+    # diff and mask
     diff = np.abs(array - medianBiasArr)
     maskedArray = np.ma.masked_where(diff > sigma * stdevBiasArr, array)
     return maskedArray
