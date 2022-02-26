@@ -2,7 +2,6 @@ from importlib import reload
 
 import ccd.overscan as overscan
 import ccd.stats as ccdStats
-import matplotlib.pyplot as plt
 import numpy as np
 from fpga import geom
 
