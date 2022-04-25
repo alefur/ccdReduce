@@ -3,8 +3,13 @@ from importlib import reload
 import ccd.stats as ccdStats
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.optimize import curve_fit
 
 reload(ccdStats)
+
+
+def HCTE(x, a, b, c, d, bias):
+    return a / x ** 4 + b / x ** 3 + c / x ** 2 + d / x + bias
 
 
 class SerialOS(object):
@@ -45,6 +50,20 @@ class SerialOS(object):
             plt.legend()
 
         return levelPerColumn
+
+    def modelHCTE(self, osIms, **updateMergeRowConfig):
+        """ model extra counts from HCTE."""
+
+        levelPerColumn = self.levelPerColumn(osIms, **updateMergeRowConfig)
+        print(levelPerColumn.shape)
+        x = np.arange(levelPerColumn.shape[1]) + 1
+        correction = np.zeros(levelPerColumn.shape)
+
+        for iAmp in range(osIms.shape[0]):
+            [a, b, c, d, bias], pcov = curve_fit(HCTE, x, levelPerColumn[iAmp])
+            correction[iAmp] = HCTE(x, *[a, b, c, d, 0])
+
+        return correction
 
     def levelPerRow(self, osIms, subMedian=False, doPlot=False, **updateMergeColumnConfig):
         """ plot serial level per amp and per column, useful to know which columns to trim."""

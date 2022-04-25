@@ -40,6 +40,11 @@ def clippedMean(array, axis, clippingMethod, sigma):
     return sigmaClip(array, axis, clippingMethod=clippingMethod, sigma=sigma).mean(axis=axis)
 
 
+def clippedStd(array, axis, clippingMethod, sigma):
+    """ return sigma-clipped mean for given axis, clippingMethod and sigma"""
+    return sigmaClip(array, axis, clippingMethod=clippingMethod, sigma=sigma).std(axis=axis)
+
+
 def merge(array, axis, mergingMethod, **clippingConfig):
     """ return a merged cube given a mergingMethod."""
     knownMethods = ['median', 'clippedMean']

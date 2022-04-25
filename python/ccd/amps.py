@@ -30,14 +30,15 @@ class amps(object):
     subOverscan = True
     subSuperBias = False
     subSuperDark = False
-
-    boxSize = 100
+    modelHCTE = True
 
     def split(self, im, rowTrim=None, colTrim=None, osColTrim=None, subOverscan=None, subSuperBias=None,
-              subSuperDark=None):
+              subSuperDark=None, modelHCTE=None):
         """ split amps and subtract overscan"""
         exp = geom.Exposure(im)
         ampIms, serialOs, _ = exp.splitImage()
+        # check dataType
+        isFlat = exp.header['IMAGETYP'] == "flat"
         # convert to array
         ampIms = np.array(ampIms).astype('f4')
         serialOs = np.array(serialOs).astype('f4')
@@ -56,6 +57,12 @@ class amps(object):
         subOverscan = self.subOverscan if subOverscan is None else subOverscan
         subSuperBias = self.subSuperBias if subSuperBias is None else subSuperBias
         subSuperDark = self.subSuperDark if subSuperDark is None else subSuperDark
+        modelHCTE = self.modelHCTE if modelHCTE is None else modelHCTE
+
+        if modelHCTE and isFlat:
+            # model and subtract extract counts from HCTE
+            HTCEcorrection = self.serialOS.modelHCTE(serialOs)
+            serialOs -= HTCEcorrection[:, None]
 
         if subOverscan:
             # estimate overscan.
@@ -82,10 +89,18 @@ class amps(object):
 
         return np.array([getAmps(frame) for frame in frames])
 
-    def superFrame(self, frames, superFrameMergeConfig=None):
+    def superFrame(self, frames, normFrameBeforeMerging=False, superFrameMergeConfig=None):
         """ """
         # combine all frames
         cubeArray = self.combine(frames)
+        # normalize frames before merging (for superFlat mainly)
+        if normFrameBeforeMerging:
+            meanFlux = ccdStats.clippedMean(cubeArray, clippingMethod='sigma', sigma=3, axis=(2, 3))
+            meanFluxNorm = meanFlux / np.max(meanFlux, axis=0)
+            normFact = 1 / meanFluxNorm.mean(axis=1)
+            print('frames normed before merging:')
+            print(",".join(["%.3f" % n for n in normFact]))
+            cubeArray *= normFact[:, None, None, None]
         # retrieve superFrame argument.
         superFrameMergeConfig = self.superFrameMergeConfig if superFrameMergeConfig is None else superFrameMergeConfig
         # merge cube
@@ -94,7 +109,7 @@ class amps(object):
     def setSuperBias(self, superBias):
         """ """
         print('setting new superBias')
-        self.superBias = superBias
+        self.superBias = superBias.copy()
         print('activating superBias subtraction')
         self.subSuperBias = True
 
@@ -102,16 +117,14 @@ class amps(object):
         """ """
         print(f'setting new superDark {darktime} s')
         # scaling superDark
-        superDark /= darktime
-        self.superDark = superDark
+        scaled = superDark.copy() / darktime
+        self.superDark = scaled
         print('activating superDark subtraction')
         self.subSuperDark = True
 
-    def ampRois(self, frame, boxSize=None):
+    @staticmethod
+    def cutRois(ampIms, boxSize=100):
         """ """
-        boxSize = self.boxSize if boxSize is None else boxSize
-        ampIms, osIms = self.split(frame)
-
         nRowsRoi = amps.nRows // boxSize
         nColsRoi = amps.nCols // boxSize
         nRois = nRowsRoi * nColsRoi
@@ -131,3 +144,29 @@ class amps(object):
                                           iCol * boxSize:iCol * boxSize + boxSize]
 
         return ampRois
+
+    @staticmethod
+    def flatStats(ampIms1, ampIms2, clippingMethod='sigma', sigma=5):
+        """ """
+        # cut ROI
+        ampRoi1 = amps.cutRois(ampIms1)
+        ampRoi2 = amps.cutRois(ampIms2)
+        # good cosmic ray rejection.
+        diffAmpRoi = ccdStats.sigmaClip(ampRoi2 - ampRoi1, axis=(2, 3), clippingMethod=clippingMethod, sigma=sigma)
+        # use this mask everywhere.
+        ampRoi1m = np.ma.masked_array(ampRoi1)
+        ampRoi1m.mask = diffAmpRoi.mask
+        ampRoi2m = np.ma.masked_array(ampRoi2)
+        ampRoi2m.mask = diffAmpRoi.mask
+        # calculate flux ratio between ROI.
+        fluxRatio = ampRoi2m.sum(axis=(2, 3)) / ampRoi1m.sum(axis=(2, 3))
+        # equilibrate flux.
+        ampRoi1m *= fluxRatio[:, :, np.newaxis, np.newaxis]
+        # calculate diff and mean.
+        diffAmpRoim = ampRoi2m - ampRoi1m
+        meanAmpRoim = (ampRoi2m + ampRoi1m) / 2
+        # totalNoise
+        totalNoise = diffAmpRoim.std(axis=(2, 3)) / np.sqrt(2)
+        # meanSignal
+        meanSignal = meanAmpRoim.mean(axis=(2, 3))
+        return meanSignal, totalNoise
