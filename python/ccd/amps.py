@@ -146,11 +146,35 @@ class amps(object):
         return ampRois
 
     @staticmethod
+    def cutCentralRois(ampIms):
+        """ """
+        boxSize = 180
+        trimCols = 166
+        trimRows = 198
+
+        trimmed = ampIms[:, trimRows:-trimRows, trimCols:-trimCols]
+
+        nRowsRoi = trimmed.shape[1] // boxSize
+        nColsRoi = trimmed.shape[2] // boxSize
+        nRois = nRowsRoi * nColsRoi
+
+        ampRois = np.zeros((amps.nAmps, nRois, boxSize, boxSize))
+
+        for iAmp, ampArray in enumerate(ampIms):
+            for iRow in range(nRowsRoi):
+                for iCol in range(nColsRoi):
+                    iBox = iRow * nColsRoi + iCol
+                    ampRois[iAmp, iBox] = trimmed[iAmp, iRow * boxSize:iRow * boxSize + boxSize,
+                                          iCol * boxSize:iCol * boxSize + boxSize]
+
+        return ampRois
+
+    @staticmethod
     def flatStats(ampIms1, ampIms2, clippingMethod='sigma', sigma=5):
         """ """
         # cut ROI
-        ampRoi1 = amps.cutRois(ampIms1)
-        ampRoi2 = amps.cutRois(ampIms2)
+        ampRoi1 = amps.cutCentralRois(ampIms1)
+        ampRoi2 = amps.cutCentralRois(ampIms2)
         # good cosmic ray rejection.
         diffAmpRoi = ccdStats.sigmaClip(ampRoi2 - ampRoi1, axis=(2, 3), clippingMethod=clippingMethod, sigma=sigma)
         # use this mask everywhere.

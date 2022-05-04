@@ -55,7 +55,6 @@ class SerialOS(object):
         """ model extra counts from HCTE."""
 
         levelPerColumn = self.levelPerColumn(osIms, **updateMergeRowConfig)
-        print(levelPerColumn.shape)
         x = np.arange(levelPerColumn.shape[1]) + 1
         correction = np.zeros(levelPerColumn.shape)
 
